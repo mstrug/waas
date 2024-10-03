@@ -1,26 +1,28 @@
-use poem::{
-    get, handler, http::{header, StatusCode}, 
-    listener::TcpListener, middleware::AddData, session::{CookieConfig, CookieSession, Session}, 
-    web::{Form, Html, Data}, EndpointExt, IntoResponse, Response, Result, Route, Server
-};
-use std::sync::{Arc};
-use serde::Deserialize;
 use poem::middleware::AddDataEndpoint;
+use poem::{
+    get, handler,
+    http::{header, StatusCode},
+    listener::TcpListener,
+    middleware::AddData,
+    session::{CookieConfig, CookieSession, Session},
+    web::{Data, Form, Html},
+    EndpointExt, IntoResponse, Response, Result, Route, Server,
+};
+use pwhash::bcrypt::*;
+use serde::Deserialize;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 mod view_entry;
 mod view_main;
 use view_entry::*;
 
-use crate::db::{DbInterface, MemDb};
 use crate::db::UserId;
-
+use crate::db::{DbInterface, MemDb};
 
 pub struct WebApp {
-    value: String,
-    current_user: Option<UserId>
+    current_user: Option<UserId>,
 }
-
 
 #[derive(Deserialize)]
 struct SigninParams {
@@ -29,9 +31,21 @@ struct SigninParams {
 }
 
 #[handler]
-pub async fn view_entry_handle(Form(params): Form<SigninParams>, session: &Session, state: Data<&Arc<Mutex<WebApp>>>, db: Data<&Arc<Mutex<MemDb>>>) -> impl IntoResponse {
+pub async fn view_entry_handle(
+    Form(params): Form<SigninParams>,
+    session: &Session,
+    state: Data<&Arc<Mutex<WebApp>>>,
+    db: Data<&Arc<Mutex<MemDb>>>,
+) -> impl IntoResponse {
+    let pass_hash = WebApp::hash_password(&params.password);
+    println!("{} {} {}", params.username, params.password, pass_hash);
 
-    if let Ok(user_id) = db.lock().await.validate_user_password(&params.username, &params.password).await {
+    if let Ok(user_id) = db
+        .lock()
+        .await
+        .validate_user_password(&params.username, &pass_hash)
+        .await
+    {
         session.set("username", params.username);
         state.lock().await.set_current_user(Some(user_id));
         Response::builder()
@@ -41,79 +55,58 @@ pub async fn view_entry_handle(Form(params): Form<SigninParams>, session: &Sessi
     } else {
         Html(
             r#"
-    <!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
-    <body>
-    no such user
-    </body>
-    </html>
-    "#,
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
+            <body>
+            no such user or wrong password
+            </body>
+            </html>
+            "#,
         )
         .into_response()
     }
-
-
-    // if (params.username == "test" || params.username == "test2" ) && params.password == "123456" {
-    //     session.set("username", params.username);
-    //     Response::builder()
-    //         .status(StatusCode::FOUND)
-    //         .header(header::LOCATION, "/")
-    //         .finish()
-    // } else {
-    //     Html(
-    //         r#"
-    // <!DOCTYPE html>
-    // <html>
-    // <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
-    // <body>
-    // no such user
-    // </body>
-    // </html>
-    // "#,
-    //     )
-    //     .into_response()
-    // }
 }
 
 #[handler]
-async fn index(session: &Session, state: Data<&Arc<Mutex<WebApp>>>, db: Data<&Arc<Mutex<MemDb>>>) -> impl IntoResponse {
+async fn index(
+    session: &Session,
+    state: Data<&Arc<Mutex<WebApp>>>,
+    db: Data<&Arc<Mutex<MemDb>>>,
+) -> impl IntoResponse {
     //println!("session empty: {}", session.is_empty());
 
     if let Some(user_id) = state.lock().await.current_user {
         let sign_message = if let Ok(_) = db.lock().await.get_user_key(user_id).await {
-            format!(r#"<a href="/key/sign">click here to sign message</a>"#)
+            format!(r#"<a href="/key/sign">click here to sign message</a><br>"#)
         } else {
             String::new()
         };
-    
+
         let username = session.get::<String>("username").unwrap();
-    
+
         Html(format!(
             r#"
-    <!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
-    <body>
-    <div>hello {username}, you are viewing a restricted resource</div>
-    <a href="/logout">click here to logout</a><br>
-    <a href="/key/generate">click here to generate the key</a><br>
-    {sign_message}
-    </body>
-    </html>
-    "#
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
+            <body>
+            <div>hello {username}, you are viewing a restricted resource</div>
+            <a href="/logout">click here to logout</a><br>
+            <a href="/key/generate">click here to generate the key</a><br>
+            {sign_message}
+            </body>
+            </html>
+            "#
         ))
         .into_response()
-        }
-        else {
-
+    } else {
         Response::builder()
             .status(StatusCode::FOUND)
             .header(header::LOCATION, "/login")
             .finish()
     }
 }
-
 
 #[handler]
 async fn logout(session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> impl IntoResponse {
@@ -127,36 +120,29 @@ async fn logout(session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> impl Int
         .finish()
 }
 
-
-
 impl WebApp {
-
     pub fn new() -> Self {
-        Self { value: String::from("ASD"),
-        current_user: None}
+        Self { current_user: None }
     }
 
     fn set_current_user(&mut self, user: Option<UserId>) {
         self.current_user = user;
     }
 
-    fn test(&mut self) {
-        println!("{}", self.value);
-        self.value = String::from("SSS");
-        println!("{}", self.value);
+    fn hash_password(pass: &str) -> String {
+        let setup = BcryptSetup {
+            salt: Some("gifLHpZdNAixJzy36HyOcK"),
+            cost: Some(5),
+            variant: Some(BcryptVariant::V2y),
+        };
+
+        hash_with(setup, pass).unwrap()
     }
 
     pub fn setup_route() -> Route {
-        //let state = Arc::new(Self{});
-    
         Route::new()
             .at("/", get(index))
-            .at("/login", get(view_entry).post(view_entry_handle) )
-            .at("/logout", get(logout) )
-            
-            //.at("/hello/:name", get(hello))
-            //.at("/login/", get(login))
-            //.at("/logout/", get(logout))
-        
+            .at("/login", get(view_entry).post(view_entry_handle))
+            .at("/logout", get(logout))
     }
 }

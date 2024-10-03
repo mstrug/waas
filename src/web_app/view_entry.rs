@@ -15,11 +15,12 @@ pub fn view_entry() -> impl IntoResponse {
         r#"
     <!DOCTYPE html>
     <html>
-    <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
+    <head><meta charset="UTF-8"><title>Wallet as a service</title></head>
     <body>
+    <div>Provide login credentials</div>
     <form action="/login" method="post">
         <div>
-            <label>Username:<input type="text" name="username" value="test" /></label>
+            <label>Username:<input type="text" name="username" value="user1" /></label>
         </div>
         <div>
             <label>Password:<input type="password" name="password" value="123456" /></label>
