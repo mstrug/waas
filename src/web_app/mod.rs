@@ -13,9 +13,8 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-mod view_entry;
-mod view_main;
-use view_entry::*;
+mod template;
+use template::*;
 
 use crate::db::UserId;
 use crate::db::{DbInterface, MemDb};
@@ -28,6 +27,16 @@ pub struct WebApp {
 struct SigninParams {
     username: String,
     password: String,
+}
+
+    
+#[handler]
+pub fn view_entry() -> impl IntoResponse {
+    Html(format!("{}{}{}{}", 
+        HTML_HEAD, 
+        HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, ""), 
+        HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_CONTENT_LOGIN),
+        HTML_BODY_FOOTER))
 }
 
 #[handler]
@@ -77,28 +86,35 @@ async fn index(
     //println!("session empty: {}", session.is_empty());
 
     if let Some(user_id) = state.lock().await.current_user {
-        let sign_message = if let Ok(_) = db.lock().await.get_user_key(user_id).await {
-            format!(r#"<a href="/key/sign">click here to sign message</a><br>"#)
-        } else {
-            String::new()
-        };
-
+        let key_available = db.lock().await.get_user_key(user_id).await.is_ok();
         let username = session.get::<String>("username").unwrap();
 
-        Html(format!(
-            r#"
-            <!DOCTYPE html>
-            <html>
-            <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
-            <body>
-            <div>hello {username}, you are viewing a restricted resource</div>
-            <a href="/logout">click here to logout</a><br>
-            <a href="/key/generate">click here to generate the key</a><br>
-            {sign_message}
-            </body>
-            </html>
-            "#
-        ))
+        let (menu_item, body_content) = if !key_available {
+            (HTML_NAVBAR_MENU_ITEM_GENERATE_KEY, HTML_BODY_CONTENT_NO_KEY.replace(HTML_USERNAME_PLACEHOLDER, &username))
+        } else {
+            (HTML_NAVBAR_MENU_ITEM_DISCARD_KEY, HTML_BODY_CONTENT_SIGN_MESSAGE.to_string())
+        };
+
+        Html(format!("{}{}{}{}", 
+            HTML_HEAD, 
+            HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, menu_item)), 
+            HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &body_content),
+            HTML_BODY_FOOTER))
+
+        // Html(format!(
+        //     r#"
+        //     <!DOCTYPE html>
+        //     <html>
+        //     <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
+        //     <body>
+        //     <div>hello {username}, you are viewing a restricted resource</div>
+        //     <a href="/logout">click here to logout</a><br>
+        //     <a href="/key/generate">click here to generate the key</a><br>
+        //     {sign_message}
+        //     </body>
+        //     </html>
+        //     "#
+        // ))
         .into_response()
     } else {
         Response::builder()
