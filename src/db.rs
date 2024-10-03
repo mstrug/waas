@@ -1,0 +1,4 @@
+
+trait db_interface {
+    
+}
