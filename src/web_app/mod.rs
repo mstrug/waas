@@ -1,4 +1,6 @@
 use poem::middleware::AddDataEndpoint;
+use poem::post;
+use poem::Error;
 use poem::{
     get, handler,
     http::{header, StatusCode},
@@ -8,8 +10,6 @@ use poem::{
     web::{Data, Form, Html},
     EndpointExt, IntoResponse, Response, Result, Route, Server,
 };
-use poem::post;
-use poem::Error;
 use pwhash::bcrypt::*;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -20,6 +20,7 @@ use template::*;
 
 use crate::db::UserId;
 use crate::db::{DbInterface, MemDb};
+use crate::service::SignService;
 
 pub struct WebApp {
     current_user: Option<UserId>,
@@ -35,14 +36,16 @@ struct LoginParams {
 struct SignMessageParams {
     message: String,
 }
-    
+
 #[handler]
 fn view_login() -> impl IntoResponse {
-    Html(format!("{}{}{}{}", 
-        HTML_HEAD, 
-        HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, ""), 
+    Html(format!(
+        "{}{}{}{}",
+        HTML_HEAD,
+        HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, ""),
         HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_CONTENT_LOGIN),
-        HTML_BODY_FOOTER))
+        HTML_BODY_FOOTER
+    ))
 }
 
 #[handler]
@@ -68,15 +71,19 @@ async fn view_login_validate(
             .header(header::LOCATION, "/")
             .finish()
     } else {
-        Html(format!("{}{}{}{}", 
-        HTML_HEAD, 
-        HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, HTML_NAVBAR_MENU_ITEM_LOGIN), 
-        HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_WRONG_PASS),
-        HTML_BODY_FOOTER))
+        Html(format!(
+            "{}{}{}{}",
+            HTML_HEAD,
+            HTML_BODY_NAVBAR.replace(
+                HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+                HTML_NAVBAR_MENU_ITEM_LOGIN
+            ),
+            HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_WRONG_PASS),
+            HTML_BODY_FOOTER
+        ))
         .into_response()
     }
 }
-
 
 #[handler]
 async fn view_sign_message(
@@ -84,14 +91,34 @@ async fn view_sign_message(
     session: &Session,
     state: Data<&Arc<Mutex<WebApp>>>,
     db: Data<&Arc<Mutex<MemDb>>>,
+    sign_service: Data<&Arc<Mutex<SignService>>>,
 ) -> impl IntoResponse {
-
-    Html(format!("{}{}{}{}", 
-    HTML_HEAD, 
-    HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_DISCARD_KEY)), 
-    HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_CONTENT_SIGN_ONGOING),
-    HTML_BODY_FOOTER))
-    .into_response()
+    if let Some(user_id) = state.lock().await.current_user {
+        if let Ok(key) = db.lock().await.get_user_key(user_id).await {
+            let signed_message = sign_service.lock().await.sign_message(&params.message, &key).await;
+            Html(format!(
+                "{}{}{}{}",
+                HTML_HEAD,
+                HTML_BODY_NAVBAR.replace(
+                    HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+                    &format!(
+                        "{}{}",
+                        HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_DISCARD_KEY
+                    )
+                ),
+                HTML_BODY_CONTENT.replace(
+                    HTML_BODY_CONTENT_PLACEHOLDER,
+                    &format!("{}<br>{:?}", HTML_BODY_CONTENT_SIGN_ONGOING, signed_message)
+                ),
+                HTML_BODY_FOOTER
+            ))
+            .into_response()
+        } else {
+            custom_error(Error::from_string("Key not found", StatusCode::NOT_FOUND)).await.into_response()
+        }
+    } else {
+        custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND)).await.into_response()
+    }
 }
 
 #[handler]
@@ -107,16 +134,27 @@ async fn view_index(
         let username = session.get::<String>("username").unwrap();
 
         let (menu_item, body_content) = if !key_available {
-            (HTML_NAVBAR_MENU_ITEM_GENERATE_KEY, HTML_BODY_CONTENT_NO_KEY.replace(HTML_USERNAME_PLACEHOLDER, &username))
+            (
+                HTML_NAVBAR_MENU_ITEM_GENERATE_KEY,
+                HTML_BODY_CONTENT_NO_KEY.replace(HTML_USERNAME_PLACEHOLDER, &username),
+            )
         } else {
-            (HTML_NAVBAR_MENU_ITEM_DISCARD_KEY, HTML_BODY_CONTENT_SIGN_MESSAGE.to_string())
+            (
+                HTML_NAVBAR_MENU_ITEM_DISCARD_KEY,
+                HTML_BODY_CONTENT_SIGN_MESSAGE.to_string(),
+            )
         };
 
-        Html(format!("{}{}{}{}", 
-            HTML_HEAD, 
-            HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, menu_item)), 
+        Html(format!(
+            "{}{}{}{}",
+            HTML_HEAD,
+            HTML_BODY_NAVBAR.replace(
+                HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+                &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, menu_item)
+            ),
             HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &body_content),
-            HTML_BODY_FOOTER))
+            HTML_BODY_FOOTER
+        ))
         .into_response()
     } else {
         Response::builder()
@@ -139,12 +177,17 @@ async fn view_logout(session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> imp
 }
 
 pub async fn custom_error(err: Error) -> impl IntoResponse {
-    Html(format!("{}{}{}{}", 
-            HTML_HEAD, 
-            HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, ""), 
-            HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &HTML_BODY_CONTENT_ANY_ERROR.replace(HTML_ERROR_PLACEHOLDER, &err.to_string())),
-            HTML_BODY_FOOTER))
-        .into_response()
+    Html(format!(
+        "{}{}{}{}",
+        HTML_HEAD,
+        HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, ""),
+        HTML_BODY_CONTENT.replace(
+            HTML_BODY_CONTENT_PLACEHOLDER,
+            &HTML_BODY_CONTENT_ANY_ERROR.replace(HTML_ERROR_PLACEHOLDER, &err.to_string())
+        ),
+        HTML_BODY_FOOTER
+    ))
+    .into_response()
 }
 
 impl WebApp {
