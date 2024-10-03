@@ -12,11 +12,13 @@ mod view_entry;
 mod view_main;
 use view_entry::*;
 
+use crate::db::{DbInterface, MemDb};
+use crate::db::UserId;
 
 
-#[derive(Default)]
 pub struct WebApp {
     value: String,
+    current_user: Option<UserId>
 }
 
 
@@ -27,10 +29,11 @@ struct SigninParams {
 }
 
 #[handler]
-pub async fn view_entry_handle(Form(params): Form<SigninParams>, session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> impl IntoResponse {
-    state.0.lock().await.test();
-    if (params.username == "test" || params.username == "test2" ) && params.password == "123456" {
+pub async fn view_entry_handle(Form(params): Form<SigninParams>, session: &Session, state: Data<&Arc<Mutex<WebApp>>>, db: Data<&Arc<Mutex<MemDb>>>) -> impl IntoResponse {
+
+    if let Ok(user_id) = db.lock().await.validate_user_password(&params.username, &params.password).await {
         session.set("username", params.username);
+        state.lock().await.set_current_user(Some(user_id));
         Response::builder()
             .status(StatusCode::FOUND)
             .header(header::LOCATION, "/")
@@ -49,38 +52,73 @@ pub async fn view_entry_handle(Form(params): Form<SigninParams>, session: &Sessi
         )
         .into_response()
     }
+
+
+    // if (params.username == "test" || params.username == "test2" ) && params.password == "123456" {
+    //     session.set("username", params.username);
+    //     Response::builder()
+    //         .status(StatusCode::FOUND)
+    //         .header(header::LOCATION, "/")
+    //         .finish()
+    // } else {
+    //     Html(
+    //         r#"
+    // <!DOCTYPE html>
+    // <html>
+    // <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
+    // <body>
+    // no such user
+    // </body>
+    // </html>
+    // "#,
+    //     )
+    //     .into_response()
+    // }
 }
 
 #[handler]
-fn index(session: &Session) -> impl IntoResponse {
+async fn index(session: &Session, state: Data<&Arc<Mutex<WebApp>>>, db: Data<&Arc<Mutex<MemDb>>>) -> impl IntoResponse {
     //println!("session empty: {}", session.is_empty());
-    match session.get::<String>("username") {
-        Some(username) => Html(format!(
+
+    if let Some(user_id) = state.lock().await.current_user {
+        let sign_message = if let Ok(_) = db.lock().await.get_user_key(user_id).await {
+            format!(r#"<a href="/key/sign">click here to sign message</a>"#)
+        } else {
+            String::new()
+        };
+    
+        let username = session.get::<String>("username").unwrap();
+    
+        Html(format!(
             r#"
     <!DOCTYPE html>
     <html>
     <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
     <body>
     <div>hello {username}, you are viewing a restricted resource</div>
-    <a href="/logout">click here to logout</a>
-    <a href="/key/generate">click here to generate the key</a>
-    <a href="/key/sign">click here to sign message</a>
+    <a href="/logout">click here to logout</a><br>
+    <a href="/key/generate">click here to generate the key</a><br>
+    {sign_message}
     </body>
     </html>
     "#
         ))
-        .into_response(),
-        None => Response::builder()
+        .into_response()
+        }
+        else {
+
+        Response::builder()
             .status(StatusCode::FOUND)
             .header(header::LOCATION, "/login")
-            .finish(),
+            .finish()
     }
 }
 
 
 #[handler]
-fn logout(session: &Session) -> impl IntoResponse {
+async fn logout(session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> impl IntoResponse {
     session.purge();
+    state.lock().await.set_current_user(None);
     println!("loggedout");
     println!("session empty: {}", session.is_empty());
     Response::builder()
@@ -94,7 +132,12 @@ fn logout(session: &Session) -> impl IntoResponse {
 impl WebApp {
 
     pub fn new() -> Self {
-        Self { value: String::from("ASD")}
+        Self { value: String::from("ASD"),
+        current_user: None}
+    }
+
+    fn set_current_user(&mut self, user: Option<UserId>) {
+        self.current_user = user;
     }
 
     fn test(&mut self) {

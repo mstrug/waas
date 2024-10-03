@@ -1,3 +1,4 @@
+use db::MemDb;
 use poem::{
     get, handler, listener::TcpListener, middleware::Tracing, web::Path, EndpointExt, Route, Server,
     session::{CookieConfig, CookieSession, Session},
@@ -9,13 +10,10 @@ use std::sync::{Arc};
 use std::cell::RefCell;
 use tokio::sync::Mutex;
 
-
 mod web_app;
 mod api;
 mod db;
 mod service;
-
-
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
@@ -24,9 +22,12 @@ async fn main() -> Result<(), std::io::Error> {
     }
     tracing_subscriber::fmt::init();
 
+    let db = MemDb::new();
+
     let app = WebApp::new();
     let router = WebApp::setup_route()
         .data(Arc::new(Mutex::new(app)))
+        .data(Arc::new(Mutex::new(db)))
         .with(CookieSession::new(CookieConfig::private( CookieKey::generate() )))
         .with(Tracing);
 
