@@ -29,7 +29,8 @@ async fn main() -> Result<(), std::io::Error> {
         .data(Arc::new(Mutex::new(app)))
         .data(Arc::new(Mutex::new(db)))
         .with(CookieSession::new(CookieConfig::private( CookieKey::generate() )))
-        .with(Tracing);
+        .with(Tracing)
+        .catch_all_error(web_app::custom_error);
 
     Server::new(TcpListener::bind("0.0.0.0:3000"))
         .name("waas")

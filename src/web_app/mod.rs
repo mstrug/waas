@@ -8,6 +8,8 @@ use poem::{
     web::{Data, Form, Html},
     EndpointExt, IntoResponse, Response, Result, Route, Server,
 };
+use poem::post;
+use poem::Error;
 use pwhash::bcrypt::*;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -24,14 +26,18 @@ pub struct WebApp {
 }
 
 #[derive(Deserialize)]
-struct SigninParams {
+struct LoginParams {
     username: String,
     password: String,
 }
 
+#[derive(Deserialize)]
+struct SignMessageParams {
+    message: String,
+}
     
 #[handler]
-pub fn view_entry() -> impl IntoResponse {
+fn view_login() -> impl IntoResponse {
     Html(format!("{}{}{}{}", 
         HTML_HEAD, 
         HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, ""), 
@@ -40,8 +46,8 @@ pub fn view_entry() -> impl IntoResponse {
 }
 
 #[handler]
-pub async fn view_entry_handle(
-    Form(params): Form<SigninParams>,
+async fn view_login_validate(
+    Form(params): Form<LoginParams>,
     session: &Session,
     state: Data<&Arc<Mutex<WebApp>>>,
     db: Data<&Arc<Mutex<MemDb>>>,
@@ -62,23 +68,34 @@ pub async fn view_entry_handle(
             .header(header::LOCATION, "/")
             .finish()
     } else {
-        Html(
-            r#"
-            <!DOCTYPE html>
-            <html>
-            <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
-            <body>
-            no such user or wrong password
-            </body>
-            </html>
-            "#,
-        )
+        Html(format!("{}{}{}{}", 
+        HTML_HEAD, 
+        HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, HTML_NAVBAR_MENU_ITEM_LOGIN), 
+        HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_WRONG_PASS),
+        HTML_BODY_FOOTER))
         .into_response()
     }
 }
 
+
 #[handler]
-async fn index(
+async fn view_sign_message(
+    Form(params): Form<SignMessageParams>,
+    session: &Session,
+    state: Data<&Arc<Mutex<WebApp>>>,
+    db: Data<&Arc<Mutex<MemDb>>>,
+) -> impl IntoResponse {
+
+    Html(format!("{}{}{}{}", 
+    HTML_HEAD, 
+    HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_DISCARD_KEY)), 
+    HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_CONTENT_SIGN_ONGOING),
+    HTML_BODY_FOOTER))
+    .into_response()
+}
+
+#[handler]
+async fn view_index(
     session: &Session,
     state: Data<&Arc<Mutex<WebApp>>>,
     db: Data<&Arc<Mutex<MemDb>>>,
@@ -100,21 +117,6 @@ async fn index(
             HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, menu_item)), 
             HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &body_content),
             HTML_BODY_FOOTER))
-
-        // Html(format!(
-        //     r#"
-        //     <!DOCTYPE html>
-        //     <html>
-        //     <head><meta charset="UTF-8"><title>Example Session Auth</title></head>
-        //     <body>
-        //     <div>hello {username}, you are viewing a restricted resource</div>
-        //     <a href="/logout">click here to logout</a><br>
-        //     <a href="/key/generate">click here to generate the key</a><br>
-        //     {sign_message}
-        //     </body>
-        //     </html>
-        //     "#
-        // ))
         .into_response()
     } else {
         Response::builder()
@@ -125,7 +127,7 @@ async fn index(
 }
 
 #[handler]
-async fn logout(session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> impl IntoResponse {
+async fn view_logout(session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> impl IntoResponse {
     session.purge();
     state.lock().await.set_current_user(None);
     println!("loggedout");
@@ -134,6 +136,15 @@ async fn logout(session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> impl Int
         .status(StatusCode::FOUND)
         .header(header::LOCATION, "/")
         .finish()
+}
+
+pub async fn custom_error(err: Error) -> impl IntoResponse {
+    Html(format!("{}{}{}{}", 
+            HTML_HEAD, 
+            HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, ""), 
+            HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &HTML_BODY_CONTENT_ANY_ERROR.replace(HTML_ERROR_PLACEHOLDER, &err.to_string())),
+            HTML_BODY_FOOTER))
+        .into_response()
 }
 
 impl WebApp {
@@ -157,8 +168,9 @@ impl WebApp {
 
     pub fn setup_route() -> Route {
         Route::new()
-            .at("/", get(index))
-            .at("/login", get(view_entry).post(view_entry_handle))
-            .at("/logout", get(logout))
+            .at("/", get(view_index))
+            .at("/login", get(view_login).post(view_login_validate))
+            .at("/logout", get(view_logout))
+            .at("/sign", post(view_sign_message))
     }
 }
