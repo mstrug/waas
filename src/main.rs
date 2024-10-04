@@ -1,6 +1,6 @@
 use db::MemDb;
 use poem::{
-    get, handler, listener::TcpListener, middleware::Tracing, web::Path, EndpointExt, Route, Server,
+    get, handler, listener::TcpListener, middleware::{Tracing, CatchPanic}, web::Path, EndpointExt, Route, Server,
     session::{CookieConfig, CookieSession, Session},
 };
 use poem::web::cookie::CookieKey;
@@ -34,6 +34,7 @@ async fn main() -> Result<(), std::io::Error> {
         .data(Arc::new(Mutex::new(sign_service)))
         .with(CookieSession::new(CookieConfig::private( CookieKey::generate() )))
         .with(Tracing)
+        .with(CatchPanic::new())
         .catch_all_error(web_app::custom_error);
 
     Server::new(TcpListener::bind("0.0.0.0:3000"))

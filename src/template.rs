@@ -22,14 +22,16 @@ document.addEventListener('DOMContentLoaded', () => {
   $navbarBurgers.forEach( el => {
     el.addEventListener('click', () => {
 
-      // Get the target from the "data-target" attribute
-      const target = el.dataset.target;
-      const $target = document.getElementById(target);
+      const mitems = document.getElementById("menu-items");
+      if (mitems.childElementCount > 0) {
+        // Get the target from the "data-target" attribute
+        const target = el.dataset.target;
+        const $target = document.getElementById(target);
 
-      // Toggle the "is-active" class on both the "navbar-burger" and the "navbar-menu"
-      el.classList.toggle('is-active');
-      $target.classList.toggle('is-active');
-
+        // Toggle the "is-active" class on both the "navbar-burger" and the "navbar-menu"
+        el.classList.toggle('is-active');
+        $target.classList.toggle('is-active');
+       }
     });
   });
 
@@ -44,17 +46,17 @@ document.addEventListener('DOMContentLoaded', () => {
           <a class="navbar-item" href="/">
             <p class="subtitle is-2">Wallet as a service</p>
           </a>
+          <a role="button" class="navbar-burger has-text-black" data-target="navMenu">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </a>
         </div>
 
-        <a role="button" class="navbar-burger has-text-black" data-target="navMenu">
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-        </a>
 
         <div id="navMenu" class="navbar-menu">
-          <div class="navbar-end">
+          <div class="navbar-end" id="menu-items">
             {menu-items}
           </div>
         </div>
