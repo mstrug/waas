@@ -249,6 +249,67 @@ async fn view_logout(session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> imp
         .finish()
 }
 
+
+#[handler]
+async fn view_generate_key(
+    session: &Session,
+    state: Data<&Arc<Mutex<WebApp>>>,
+    db: Data<&Arc<Mutex<MemDb>>>,
+    sign_service: Data<&Arc<Mutex<SignService>>>
+) -> impl IntoResponse {
+    if let Some(user_id) = state.lock().await.current_user {
+        if db.lock().await.get_user_key(user_id).await.is_ok() {
+            custom_error(Error::from_string("User already has a key", StatusCode::NOT_FOUND)).await.into_response()
+        } else {
+            let key = sign_service.lock().await.generate_key();
+            db.lock().await.add_user_key(user_id, &key).await.ok();
+            Html(format!(
+                "{}{}{}{}",
+                HTML_HEAD,
+                HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, &format!("{}{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE, HTML_NAVBAR_MENU_ITEM_DISCARD_KEY)),
+                HTML_BODY_CONTENT.replace(
+                    HTML_BODY_CONTENT_PLACEHOLDER,
+                    HTML_BODY_CONTENT_KEY_GENERATED
+                ),
+                HTML_BODY_FOOTER
+            ))
+            .into_response()
+        }
+    } else {
+        custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND)).await.into_response()
+    }
+}
+
+
+#[handler]
+async fn view_discard_key(
+    session: &Session,
+    state: Data<&Arc<Mutex<WebApp>>>,
+    db: Data<&Arc<Mutex<MemDb>>>,
+    sign_service: Data<&Arc<Mutex<SignService>>>
+) -> impl IntoResponse {
+    if let Some(user_id) = state.lock().await.current_user {
+        if !db.lock().await.get_user_key(user_id).await.is_ok() {
+            custom_error(Error::from_string("User doesn't have a key", StatusCode::NOT_FOUND)).await.into_response()
+        } else {
+            db.lock().await.discard_user_key(user_id).await.ok();
+            Html(format!(
+                "{}{}{}{}",
+                HTML_HEAD,
+                HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_GENERATE_KEY)),
+                HTML_BODY_CONTENT.replace(
+                    HTML_BODY_CONTENT_PLACEHOLDER,
+                    HTML_BODY_CONTENT_KEY_DISCARDED
+                ),
+                HTML_BODY_FOOTER
+            ))
+            .into_response()
+        }
+    } else {
+        custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND)).await.into_response()
+    }
+}
+
 pub async fn custom_error(err: Error) -> impl IntoResponse {
     Html(format!(
         "{}{}{}{}",
@@ -314,5 +375,7 @@ impl WebApp {
             .at("/sign", post(view_sign_message))
             .at("/event/:user_id", get(event))
             .at("/message-signed", get(view_message_signed))
+            .at("/key/generate", get(view_generate_key))
+            .at("/key/discard", get(view_discard_key))
     }
 }

@@ -14,15 +14,19 @@ pub type UserId = u64;
 pub trait DbInterface {
     async fn validate_user_password(&self, user: &str, password_hash: &str) -> Result<UserId, DbError>;
 
-    async fn get_user_key(&self, user_id: UserId) -> Result<String, DbError>;
+    async fn get_user_key(&self, user_id: UserId) -> Result<Vec<u8>, DbError>;
 
     async fn add_user(&mut self, user: &str, password_hash: &str) -> Result<UserId, DbError>;
+
+    async fn add_user_key(&mut self, user_id: UserId, key: &[u8]) -> Result<(), DbError>;
+
+    async fn discard_user_key(&mut self, user_id: UserId) -> Result<(), DbError>;
 }
 
 
 pub struct MemDb {
     users: HashMap<String, (UserId, String)>,
-    keys: HashMap<UserId, String>,
+    keys: HashMap<UserId, Vec<u8>>,
 }
 
 impl MemDb {
@@ -35,10 +39,7 @@ impl MemDb {
 // 123456 $2y$05$gifLHpZdNAixJzy36HyOc.1PsRNbn5Je9vlWalKyg3sGqSAW.8rFG
 // Alex5 $2y$05$gifLHpZdNAixJzy36HyOc.ge.9FMFAI.6NwvXHqIpLQpCF3hepE9e
 // trumpet7 $2y$05$gifLHpZdNAixJzy36HyOc.wUk55Iu1fE9xt4ji7wq/WLxS8S4zDV2
-            keys: HashMap::from([
-                (1, "k1".to_string()),
-                //(2, "k2".to_string()),
-            ]),
+            keys: HashMap::new()
         }
     }
 }
@@ -56,7 +57,7 @@ impl DbInterface for MemDb {
         }
     }
 
-    async fn get_user_key(&self, user_id: UserId) -> Result<String, DbError> {
+    async fn get_user_key(&self, user_id: UserId) -> Result<Vec<u8>, DbError> {
         self.keys.get(&user_id).ok_or(DbError::KeyNotFound).cloned()
     }
 
@@ -69,5 +70,15 @@ impl DbInterface for MemDb {
             self.users.insert(user.to_string(), (user_id, password_hash.to_string()));
             Ok(user_id)
         }
+    }
+
+    async fn add_user_key(&mut self, user_id: UserId, key: &[u8]) -> Result<(), DbError> {
+        self.keys.insert(user_id, key.to_vec());
+        Ok(())
+    }
+
+    async fn discard_user_key(&mut self, user_id: UserId) -> Result<(), DbError> {
+        self.keys.remove(&user_id);
+        Ok(())
     }
 }

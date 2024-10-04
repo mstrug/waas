@@ -34,7 +34,7 @@ pub const HTML_NAVBAR_MENU_ITEM_LOGIN: &str = r##"<a class="navbar-item" href="/
 pub const HTML_NAVBAR_MENU_ITEM_LOGOUT: &str = r##"<a class="navbar-item" href="/logout"> Logout </a>"##;
 pub const HTML_NAVBAR_MENU_ITEM_GENERATE_KEY: &str = r##"<a class="navbar-item" href="/key/generate"> Generate Key </a>"##;
 pub const HTML_NAVBAR_MENU_ITEM_DISCARD_KEY: &str = r##"<a class="navbar-item" href="/key/discard"> Discard Key </a>"##;
-pub const HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE: &str = r##"<a class="navbar-item" href="/"> Sign message </a>"##;
+pub const HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE: &str = r##"<a class="navbar-item" href="/"> Sign Message </a>"##;
 
 pub const HTML_BODY_CONTENT: &str = r##"<!-- Hero content: will be in the middle -->
   <div class="hero-body">
@@ -79,6 +79,17 @@ pub const HTML_BODY_CONTENT_NO_KEY: &str = r##"
         <div class="block">It looks like you haven't generated a key yet.</div>
         <div class="block">To do so, click on the <strong>Generate Key</strong> option in the upper right corner.</div>
     </div>"##;
+pub const HTML_BODY_CONTENT_KEY_GENERATED: &str = r##"
+    <div class="has-text-centered">
+        <div class="block"><p class="subtitle is-3">Your key was generated!</p></div>
+        <div class="block">Now you can sign your messages.</div>
+        <div class="block">To do so, click on the <strong>Sign Message</strong> option in the upper right corner.</div>
+    </div>"##;
+pub const HTML_BODY_CONTENT_KEY_DISCARDED: &str = r##"
+    <div class="has-text-centered">
+        <div class="block"><p class="subtitle is-3">Your key was discarded!</p></div>
+        <div class="block">To create a new one, click on the <strong>Generate Key</strong> option in the upper right corner.</div>
+    </div>"##;
 pub const HTML_BODY_CONTENT_SIGN_MESSAGE: &str = r##"<form action="/sign" method="post">
                 <div class="field">
                     <label class="label is-medium">Provide message to sign using your key</label>
@@ -101,7 +112,7 @@ pub const HTML_BODY_CONTENT_SIGN_ONGOING: &str = r##"
     </div>"##;
 pub const HTML_BODY_CONTENT_MESSAGE_SIGNED: &str = r##"
         <div class="field">
-            <label class="label is-medium">Your signed message:</label>
+            <label class="label is-medium">Here is a base-64 encoded secp256k1 signature of your message:</label>
             <div class="control">
                 <textarea class="textarea is-medium is-primary" readonly>{body-content-internal}</textarea>
             </div>  

@@ -12,3 +12,6 @@ pwhash = { version = "1.0.0" }
 rand = { version = "0.8.5" }
 futures-util = { version = "0.3.21" }
 tokio-stream = "0.1.8"
+k256="0.9.6"
+rand_core="0.6.3"
+base64 = "0.22.1"
