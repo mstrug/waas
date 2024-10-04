@@ -34,6 +34,7 @@ pub const HTML_NAVBAR_MENU_ITEM_LOGIN: &str = r##"<a class="navbar-item" href="/
 pub const HTML_NAVBAR_MENU_ITEM_LOGOUT: &str = r##"<a class="navbar-item" href="/logout"> Logout </a>"##;
 pub const HTML_NAVBAR_MENU_ITEM_GENERATE_KEY: &str = r##"<a class="navbar-item" href="/key/generate"> Generate Key </a>"##;
 pub const HTML_NAVBAR_MENU_ITEM_DISCARD_KEY: &str = r##"<a class="navbar-item" href="/key/discard"> Discard Key </a>"##;
+pub const HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE: &str = r##"<a class="navbar-item" href="/"> Sign message </a>"##;
 
 pub const HTML_BODY_CONTENT: &str = r##"<!-- Hero content: will be in the middle -->
   <div class="hero-body">
@@ -71,6 +72,7 @@ pub const HTML_BODY_CONTENT_LOGIN: &str = r##"<form action="/login" method="post
             </form>"##;
 pub const HTML_USERNAME_PLACEHOLDER: &str = "{user}";
 pub const HTML_ERROR_PLACEHOLDER: &str = "{error}";
+pub const HTML_BODY_CONTENT_INTERNAL_PLACEHOLDER: &str = "{body-content-internal}";
 pub const HTML_BODY_CONTENT_NO_KEY: &str = r##"
     <div class="has-text-centered">
         <div class="block"><p class="subtitle is-3">Hello {user}!</p></div>
@@ -97,6 +99,13 @@ pub const HTML_BODY_CONTENT_SIGN_ONGOING: &str = r##"
             <progress id="sign_progress" class="progress is-small is-primary" max="100">15%</progress>
         </div>
     </div>"##;
+pub const HTML_BODY_CONTENT_MESSAGE_SIGNED: &str = r##"
+        <div class="field">
+            <label class="label is-medium">Your signed message:</label>
+            <div class="control">
+                <textarea class="textarea is-medium is-primary" readonly>{body-content-internal}</textarea>
+            </div>  
+        </div>"##;
 pub const HTML_BODY_CONTENT_ANY_ERROR: &str = r##"
     <div class="has-text-centered">
         <div class="block"><p class="subtitle is-3">Error occured!</p></div>
@@ -108,7 +117,7 @@ pub const HTML_BODY_FOOTER: &str = r##"
   <div class="hero-foot">
     <div class="content has-text-centered m-2">
     <p>
-      <strong>Rust Fullstack demo</strong> by <a href="https://www.linkedin.com/in/michal-strug/">Michał Strug</a> using <a href="https://github.com/poem-web/poem">Poem</a> and <a href="https://bulma.io/">Bulma CSS</a>.
+      <strong>Rust Fullstack demo</strong> by <a href="https://www.linkedin.com/in/michal-strug/">Michał Strug</a> using <a href="https://github.com/poem-web/poem">Poem</a> and <a href="https://bulma.io/">Bulma CSS</a>. v0.1.0
     </p>
   </div>
   </div>

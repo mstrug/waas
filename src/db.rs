@@ -1,7 +1,7 @@
 use std::{collections::hash_map::*, thread::panicking};
 use rand::Rng;
 
-
+#[derive(Clone, Debug)]
 pub enum DbError {
     UserNotFound,
     UserAlreadyExists,
