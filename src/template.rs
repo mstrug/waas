@@ -11,6 +11,30 @@ pub const HTML_HEAD: &str = r##"
     </head>"##;
 
 pub const HTML_BODY_NAVBAR: &str = r##"<body>
+<script>
+// Handles burger menu items
+document.addEventListener('DOMContentLoaded', () => {
+
+  // Get all "navbar-burger" elements
+  const $navbarBurgers = Array.prototype.slice.call(document.querySelectorAll('.navbar-burger'), 0);
+
+  // Add a click event on each of them
+  $navbarBurgers.forEach( el => {
+    el.addEventListener('click', () => {
+
+      // Get the target from the "data-target" attribute
+      const target = el.dataset.target;
+      const $target = document.getElementById(target);
+
+      // Toggle the "is-active" class on both the "navbar-burger" and the "navbar-menu"
+      el.classList.toggle('is-active');
+      $target.classList.toggle('is-active');
+
+    });
+  });
+
+});
+</script>
 <section class="hero has-background-light is-fullheight">
   <!-- Hero head: will stick at the top -->
   <div class="hero-head">
@@ -21,7 +45,15 @@ pub const HTML_BODY_NAVBAR: &str = r##"<body>
             <p class="subtitle is-2">Wallet as a service</p>
           </a>
         </div>
-        <div id="navbarMenuHeroA" class="navbar-menu">
+
+        <a role="button" class="navbar-burger has-text-black" data-target="navMenu">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+        </a>
+
+        <div id="navMenu" class="navbar-menu">
           <div class="navbar-end">
             {menu-items}
           </div>
