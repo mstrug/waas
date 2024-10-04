@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="container">
         <div class="navbar-brand">
           <a class="navbar-item" href="/">
-            <p class="subtitle is-2">Wallet as a service</p>
+            <p class="subtitle is-2">Wallet service</p>
           </a>
           <a role="button" class="navbar-burger has-text-black" data-target="navMenu">
             <span></span>

@@ -32,7 +32,7 @@ async fn main() -> Result<(), std::io::Error> {
         .data(Arc::new(Mutex::new(app)))
         .data(Arc::new(Mutex::new(db)))
         .data(Arc::new(Mutex::new(sign_service)))
-        .with(CookieSession::new(CookieConfig::private( CookieKey::generate() )))
+        .with(CookieSession::new(CookieConfig::private( CookieKey::generate() ).secure(false)))
         .with(Tracing)
         .with(CatchPanic::new())
         .catch_all_error(web_app::custom_error);

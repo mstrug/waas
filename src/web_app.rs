@@ -1,3 +1,5 @@
+use futures_util::stream;
+use futures_util::{stream::BoxStream, Stream, StreamExt};
 use poem::middleware::AddDataEndpoint;
 use poem::post;
 use poem::Error;
@@ -7,28 +9,28 @@ use poem::{
     listener::TcpListener,
     middleware::AddData,
     session::{CookieConfig, CookieSession, Session},
-    web::{Data, Form, Html, Path},
     web::sse::{Event, SSE},
+    web::{Data, Form, Html, Path},
     EndpointExt, IntoResponse, Response, Result, Route, Server,
 };
 use pwhash::bcrypt::*;
+use rand::Rng;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use futures_util::stream;
 use std::time::Instant;
+use tokio::sync::Mutex;
 use tokio::time::Duration;
-use futures_util::{stream::BoxStream, Stream, StreamExt};
 
-use super::template::*;
 use super::db::UserId;
 use super::db::{DbInterface, MemDb};
 use super::service::SignService;
+use super::template::*;
 
 #[derive(Default)]
 pub struct WebApp {
-    current_user: Option<UserId>,
+    // Map of currently logged users and cookie session
+    current_users: HashMap<String, UserId>,
     pending_messages: HashMap<UserId, String>,
     signed_messages: HashMap<UserId, String>,
 }
@@ -63,7 +65,6 @@ async fn view_login_validate(
     db: Data<&Arc<Mutex<MemDb>>>,
 ) -> impl IntoResponse {
     let pass_hash = WebApp::hash_password(&params.password);
-    println!("{} {} {}", params.username, params.password, pass_hash);
 
     if let Ok(user_id) = db
         .lock()
@@ -71,8 +72,17 @@ async fn view_login_validate(
         .validate_user_password(&params.username, &pass_hash)
         .await
     {
-        session.set("username", params.username);
-        state.lock().await.set_current_user(Some(user_id));
+        let user_session: String = (0..16)
+            .map(|_| char::from(rand::thread_rng().gen_range(32..127)))
+            .collect();
+        session.set("user_session", &user_session);
+
+        state
+            .lock()
+            .await
+            .current_users
+            .insert(user_session, user_id);
+
         Response::builder()
             .status(StatusCode::FOUND)
             .header(header::LOCATION, "/")
@@ -101,30 +111,40 @@ async fn view_sign_message(
     sign_service: Data<&Arc<Mutex<SignService>>>,
 ) -> impl IntoResponse {
     let mut state = state.lock().await;
-    if let Some(user_id) = state.current_user {
-        if state.pending_messages.get(&user_id).is_some() {
-            return custom_error(Error::from_string("User already waits for message sign", StatusCode::NOT_FOUND)).await.into_response()
-        }
 
-        if let Ok(key) = db.lock().await.get_user_key(user_id).await {
-            //let signed_message = sign_service.lock().await.sign_message(&params.message, &key).await;
-            
-            state.pending_messages.insert(user_id, params.message);
+    if let Some(user_session) = session.get::<String>("user_session") {
+        if let Some(user_id) = state.current_users.get(&user_session) {
+            let user_id = user_id.clone();
+            if state.pending_messages.get(&user_id).is_some() {
+                return custom_error(Error::from_string(
+                    "User already waits for message sign",
+                    StatusCode::NOT_FOUND,
+                ))
+                .await
+                .into_response();
+            }
 
-            Html(format!(
-                "{}{}{}{}{}",
-                HTML_HEAD,
-                HTML_BODY_NAVBAR.replace(
-                    HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
-                    &format!(
-                        "{}{}",
-                        HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_DISCARD_KEY
-                    )
-                ),
-                HTML_BODY_CONTENT.replace(
-                    HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_CONTENT_SIGN_ONGOING
-                ),
-                format!(r##" <script>
+            if let Ok(key) = db.lock().await.get_user_key(user_id).await {
+                //let signed_message = sign_service.lock().await.sign_message(&params.message, &key).await;
+
+                state.pending_messages.insert(user_id, params.message);
+
+                Html(format!(
+                    "{}{}{}{}{}",
+                    HTML_HEAD,
+                    HTML_BODY_NAVBAR.replace(
+                        HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+                        &format!(
+                            "{}{}",
+                            HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_DISCARD_KEY
+                        )
+                    ),
+                    HTML_BODY_CONTENT.replace(
+                        HTML_BODY_CONTENT_PLACEHOLDER,
+                        HTML_BODY_CONTENT_SIGN_ONGOING
+                    ),
+                    format!(
+                        r##" <script>
                     var eventSource = new EventSource('event/{user_id}');
                     eventSource.onmessage = function(event) {{
                         console.log("Received event");
@@ -148,15 +168,28 @@ async fn view_sign_message(
                         window.location.href = "/message-signed"
                     }}
                     </script>
-                "##),
-                HTML_BODY_FOOTER
-            ))
-            .into_response()
+                "##
+                    ),
+                    HTML_BODY_FOOTER
+                ))
+                .into_response()
+            } else {
+                custom_error(Error::from_string("Key not found", StatusCode::NOT_FOUND))
+                    .await
+                    .into_response()
+            }
         } else {
-            custom_error(Error::from_string("Key not found", StatusCode::NOT_FOUND)).await.into_response()
+            custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND))
+                .await
+                .into_response()
         }
     } else {
-        custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND)).await.into_response()
+        custom_error(Error::from_string(
+            "User session not found",
+            StatusCode::NOT_FOUND,
+        ))
+        .await
+        .into_response()
     }
 }
 
@@ -168,29 +201,51 @@ async fn view_message_signed(
     sign_service: Data<&Arc<Mutex<SignService>>>,
 ) -> impl IntoResponse {
     let mut state = state.lock().await;
-    if let Some(user_id) = state.current_user {
-        if let Some(msg) = state.signed_messages.remove(&user_id) {
-            Html(format!(
-                "{}{}{}{}",
-                HTML_HEAD,
-                HTML_BODY_NAVBAR.replace(
-                    HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
-                    &format!(
-                        "{}{}{}",
-                        HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE, HTML_NAVBAR_MENU_ITEM_DISCARD_KEY,
-                    )
-                ),
-                HTML_BODY_CONTENT.replace(
-                    HTML_BODY_CONTENT_PLACEHOLDER, &HTML_BODY_CONTENT_MESSAGE_SIGNED.replace(HTML_BODY_CONTENT_INTERNAL_PLACEHOLDER, &msg)
-                ),
-                HTML_BODY_FOOTER
-            ))
-            .into_response()
+
+    if let Some(user_session) = session.get::<String>("user_session") {
+        if let Some(user_id) = state.current_users.get(&user_session) {
+            let user_id = user_id.clone();
+            if let Some(msg) = state.signed_messages.remove(&user_id) {
+                Html(format!(
+                    "{}{}{}{}",
+                    HTML_HEAD,
+                    HTML_BODY_NAVBAR.replace(
+                        HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+                        &format!(
+                            "{}{}{}",
+                            HTML_NAVBAR_MENU_ITEM_LOGOUT,
+                            HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE,
+                            HTML_NAVBAR_MENU_ITEM_DISCARD_KEY,
+                        )
+                    ),
+                    HTML_BODY_CONTENT.replace(
+                        HTML_BODY_CONTENT_PLACEHOLDER,
+                        &HTML_BODY_CONTENT_MESSAGE_SIGNED
+                            .replace(HTML_BODY_CONTENT_INTERNAL_PLACEHOLDER, &msg)
+                    ),
+                    HTML_BODY_FOOTER
+                ))
+                .into_response()
+            } else {
+                custom_error(Error::from_string(
+                    "User doesn't have any signed messages",
+                    StatusCode::NOT_FOUND,
+                ))
+                .await
+                .into_response()
+            }
         } else {
-            custom_error(Error::from_string("User doesn't have any signed messages", StatusCode::NOT_FOUND)).await.into_response()
+            custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND))
+                .await
+                .into_response()
         }
     } else {
-        custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND)).await.into_response()
+        custom_error(Error::from_string(
+            "User session not found",
+            StatusCode::NOT_FOUND,
+        ))
+        .await
+        .into_response()
     }
 }
 
@@ -200,113 +255,197 @@ async fn view_index(
     state: Data<&Arc<Mutex<WebApp>>>,
     db: Data<&Arc<Mutex<MemDb>>>,
 ) -> impl IntoResponse {
-    //println!("session empty: {}", session.is_empty());
+    let go_to_login_view = Response::builder()
+        .status(StatusCode::FOUND)
+        .header(header::LOCATION, "/login")
+        .finish();
 
-    if let Some(user_id) = state.lock().await.current_user {
-        let key_available = db.lock().await.get_user_key(user_id).await.is_ok();
-        let username = session.get::<String>("username").unwrap();
+    if let Some(user_session) = session.get::<String>("user_session") {
+        if let Some(user_id) = state.lock().await.current_users.get(&user_session) {
+            let key_available = db.lock().await.get_user_key(*user_id).await.is_ok();
 
-        let (menu_item, body_content) = if !key_available {
-            (
-                HTML_NAVBAR_MENU_ITEM_GENERATE_KEY,
-                HTML_BODY_CONTENT_NO_KEY.replace(HTML_USERNAME_PLACEHOLDER, &username),
-            )
+            let (menu_item, body_content) = if !key_available {
+                (
+                    HTML_NAVBAR_MENU_ITEM_GENERATE_KEY,
+                    HTML_BODY_CONTENT_NO_KEY.replace(HTML_USERNAME_PLACEHOLDER, "todo!"),
+                )
+            } else {
+                (
+                    HTML_NAVBAR_MENU_ITEM_DISCARD_KEY,
+                    HTML_BODY_CONTENT_SIGN_MESSAGE.to_string(),
+                )
+            };
+
+            Html(format!(
+                "{}{}{}{}",
+                HTML_HEAD,
+                HTML_BODY_NAVBAR.replace(
+                    HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+                    &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, menu_item)
+                ),
+                HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &body_content),
+                HTML_BODY_FOOTER
+            ))
+            .into_response()
         } else {
-            (
-                HTML_NAVBAR_MENU_ITEM_DISCARD_KEY,
-                HTML_BODY_CONTENT_SIGN_MESSAGE.to_string(),
-            )
-        };
-
-        Html(format!(
-            "{}{}{}{}",
-            HTML_HEAD,
-            HTML_BODY_NAVBAR.replace(
-                HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
-                &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, menu_item)
-            ),
-            HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &body_content),
-            HTML_BODY_FOOTER
-        ))
-        .into_response()
+            // session cookit exists but user not logged in
+            session.remove(&user_session);
+            go_to_login_view
+        }
     } else {
-        Response::builder()
-            .status(StatusCode::FOUND)
-            .header(header::LOCATION, "/login")
-            .finish()
+        go_to_login_view
     }
+
+    // if let Some(user_id) = state.lock().await.current_users {
+    //     let key_available = db.lock().await.get_user_key(user_id).await.is_ok();
+    //     let username = session.get::<String>("username").unwrap();
+
+    //     let (menu_item, body_content) = if !key_available {
+    //         (
+    //             HTML_NAVBAR_MENU_ITEM_GENERATE_KEY,
+    //             HTML_BODY_CONTENT_NO_KEY.replace(HTML_USERNAME_PLACEHOLDER, &username),
+    //         )
+    //     } else {
+    //         (
+    //             HTML_NAVBAR_MENU_ITEM_DISCARD_KEY,
+    //             HTML_BODY_CONTENT_SIGN_MESSAGE.to_string(),
+    //         )
+    //     };
+
+    //     Html(format!(
+    //         "{}{}{}{}",
+    //         HTML_HEAD,
+    //         HTML_BODY_NAVBAR.replace(
+    //             HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+    //             &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, menu_item)
+    //         ),
+    //         HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &body_content),
+    //         HTML_BODY_FOOTER
+    //     ))
+    //     .into_response()
+    // } else {
+    //     Response::builder()
+    //         .status(StatusCode::FOUND)
+    //         .header(header::LOCATION, "/login")
+    //         .finish()
+    // }
 }
 
 #[handler]
 async fn view_logout(session: &Session, state: Data<&Arc<Mutex<WebApp>>>) -> impl IntoResponse {
+    if let Some(user_session) = session.get::<String>("user_session") {
+        state.lock().await.current_users.remove(&user_session);
+    }
+
     session.purge();
-    state.lock().await.set_current_user(None);
-    println!("loggedout");
-    println!("session empty: {}", session.is_empty());
     Response::builder()
         .status(StatusCode::FOUND)
         .header(header::LOCATION, "/")
         .finish()
 }
 
-
 #[handler]
 async fn view_generate_key(
     session: &Session,
     state: Data<&Arc<Mutex<WebApp>>>,
     db: Data<&Arc<Mutex<MemDb>>>,
-    sign_service: Data<&Arc<Mutex<SignService>>>
+    sign_service: Data<&Arc<Mutex<SignService>>>,
 ) -> impl IntoResponse {
-    if let Some(user_id) = state.lock().await.current_user {
-        if db.lock().await.get_user_key(user_id).await.is_ok() {
-            custom_error(Error::from_string("User already has a key", StatusCode::NOT_FOUND)).await.into_response()
+    if let Some(user_session) = session.get::<String>("user_session") {
+        if let Some(user_id) = state.lock().await.current_users.get(&user_session) {
+            if db.lock().await.get_user_key(*user_id).await.is_ok() {
+                custom_error(Error::from_string(
+                    "User already has a key",
+                    StatusCode::NOT_FOUND,
+                ))
+                .await
+                .into_response()
+            } else {
+                let key = sign_service.lock().await.generate_key();
+                db.lock().await.add_user_key(*user_id, &key).await.ok();
+                Html(format!(
+                    "{}{}{}{}",
+                    HTML_HEAD,
+                    HTML_BODY_NAVBAR.replace(
+                        HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+                        &format!(
+                            "{}{}{}",
+                            HTML_NAVBAR_MENU_ITEM_LOGOUT,
+                            HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE,
+                            HTML_NAVBAR_MENU_ITEM_DISCARD_KEY
+                        )
+                    ),
+                    HTML_BODY_CONTENT.replace(
+                        HTML_BODY_CONTENT_PLACEHOLDER,
+                        HTML_BODY_CONTENT_KEY_GENERATED
+                    ),
+                    HTML_BODY_FOOTER
+                ))
+                .into_response()
+            }
         } else {
-            let key = sign_service.lock().await.generate_key();
-            db.lock().await.add_user_key(user_id, &key).await.ok();
-            Html(format!(
-                "{}{}{}{}",
-                HTML_HEAD,
-                HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, &format!("{}{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE, HTML_NAVBAR_MENU_ITEM_DISCARD_KEY)),
-                HTML_BODY_CONTENT.replace(
-                    HTML_BODY_CONTENT_PLACEHOLDER,
-                    HTML_BODY_CONTENT_KEY_GENERATED
-                ),
-                HTML_BODY_FOOTER
-            ))
-            .into_response()
+            custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND))
+                .await
+                .into_response()
         }
     } else {
-        custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND)).await.into_response()
+        custom_error(Error::from_string(
+            "User session not found",
+            StatusCode::NOT_FOUND,
+        ))
+        .await
+        .into_response()
     }
 }
-
 
 #[handler]
 async fn view_discard_key(
     session: &Session,
     state: Data<&Arc<Mutex<WebApp>>>,
     db: Data<&Arc<Mutex<MemDb>>>,
-    sign_service: Data<&Arc<Mutex<SignService>>>
+    sign_service: Data<&Arc<Mutex<SignService>>>,
 ) -> impl IntoResponse {
-    if let Some(user_id) = state.lock().await.current_user {
-        if !db.lock().await.get_user_key(user_id).await.is_ok() {
-            custom_error(Error::from_string("User doesn't have a key", StatusCode::NOT_FOUND)).await.into_response()
+    if let Some(user_session) = session.get::<String>("user_session") {
+        if let Some(user_id) = state.lock().await.current_users.get(&user_session) {
+            if !db.lock().await.get_user_key(*user_id).await.is_ok() {
+                custom_error(Error::from_string(
+                    "User doesn't have a key",
+                    StatusCode::NOT_FOUND,
+                ))
+                .await
+                .into_response()
+            } else {
+                db.lock().await.discard_user_key(*user_id).await.ok();
+                Html(format!(
+                    "{}{}{}{}",
+                    HTML_HEAD,
+                    HTML_BODY_NAVBAR.replace(
+                        HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+                        &format!(
+                            "{}{}",
+                            HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_GENERATE_KEY
+                        )
+                    ),
+                    HTML_BODY_CONTENT.replace(
+                        HTML_BODY_CONTENT_PLACEHOLDER,
+                        HTML_BODY_CONTENT_KEY_DISCARDED
+                    ),
+                    HTML_BODY_FOOTER
+                ))
+                .into_response()
+            }
         } else {
-            db.lock().await.discard_user_key(user_id).await.ok();
-            Html(format!(
-                "{}{}{}{}",
-                HTML_HEAD,
-                HTML_BODY_NAVBAR.replace(HTML_NAVBAR_MENU_ITEM_PLACEHOLDER, &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_GENERATE_KEY)),
-                HTML_BODY_CONTENT.replace(
-                    HTML_BODY_CONTENT_PLACEHOLDER,
-                    HTML_BODY_CONTENT_KEY_DISCARDED
-                ),
-                HTML_BODY_FOOTER
-            ))
-            .into_response()
+            custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND))
+                .await
+                .into_response()
         }
     } else {
-        custom_error(Error::from_string("User not found", StatusCode::NOT_FOUND)).await.into_response()
+        custom_error(Error::from_string(
+            "User session not found",
+            StatusCode::NOT_FOUND,
+        ))
+        .await
+        .into_response()
     }
 }
 
@@ -325,36 +464,72 @@ pub async fn custom_error(err: Error) -> impl IntoResponse {
 }
 
 #[handler]
-async fn event(Path(user_id): Path<UserId>, state: Data<&Arc<Mutex<WebApp>>>, db: Data<&Arc<Mutex<MemDb>>>, sign_service: Data<&Arc<Mutex<SignService>>>) -> SSE {
-    println!("called event endpoint: {}", user_id);
-    // todo: check session
-    let mut state = state.lock().await;
-
-    let event = if let Some(msg) = state.pending_messages.remove(&user_id) {
-        let key = db.lock().await.get_user_key(user_id).await.unwrap();
-        if let Ok(output) = sign_service.lock().await.sign_message(&msg, &key).await {
-            state.signed_messages.insert(user_id, output);
-            Event::message(format!(r##"{{"user_id": {user_id}, "error": "none"}}"##))
-        } else {
-            Event::message(format!(r##"{{"user_id": {user_id}, "error": "Signing of message failed!"}}"##))
-        }
-    } else {
-        Event::message(format!(r##"{{"user_id": {user_id}, "error": "No pending message for current user!"}}"##))
-    };
-
-    SSE::new(
-        stream::once( async move {event})
-    )
+async fn favicon() -> impl IntoResponse {
+    Response::builder()
+        .status(StatusCode::OK)
+        .content_type("image/vnd.microsoft.icon")
+        .body(vec![ 0,0,1,0,1,0,1,1, 0,0,1,0,0x20,0,0x30,0, 
+                    0,0,0x16,0,0,0,0x28,0, 0,0,1,0,0,0,2,0,
+                    0,0,1,0,0x20,0,0,0, 0,0,4,0,0,0,0xC2,0x1E,
+                    0,0,0x2C,0x1E,0,0,0,0, 0,0,0,0,0,0,0xFC,0xFE,
+                    0xFC,0xFF,0,0,0,0])
+        .into_response()
 }
 
+#[handler]
+async fn event(
+    Path(user_id): Path<UserId>,
+    session: &Session,
+    state: Data<&Arc<Mutex<WebApp>>>,
+    db: Data<&Arc<Mutex<MemDb>>>,
+    sign_service: Data<&Arc<Mutex<SignService>>>,
+) -> SSE {
+    println!("1");
+    let event = if let Some(user_session) = session.get::<String>("user_session") {
+        println!("1");
+        let mut state = state.lock().await;
+        if let Some(user_id_from_state) = state.current_users.get(&user_session) {
+            println!("1");
+            if user_id == *user_id_from_state {
+                println!("1");
+
+                if let Some(msg) = state.pending_messages.remove(&user_id) {
+                    let key = db.lock().await.get_user_key(user_id).await.unwrap();
+                    if let Ok(output) = sign_service.lock().await.sign_message(&msg, &key).await {
+                        state.signed_messages.insert(user_id, output);
+                        Event::message(format!(r##"{{"user_id": {user_id}, "error": "none"}}"##))
+                    } else {
+                        Event::message(format!(
+                            r##"{{"user_id": {user_id}, "error": "Signing of message failed!"}}"##
+                        ))
+                    }
+                } else {
+                    Event::message(format!(
+                        r##"{{"user_id": {user_id}, "error": "No pending message for current user!"}}"##
+                    ))
+                }
+            } else {
+                Event::message(format!(
+                    r##"{{"user_id": {user_id}, "error": "User not matched with the session!"}}"##
+                ))
+            }
+        } else {
+            Event::message(format!(
+                r##"{{"user_id": {user_id}, "error": "No current user!"}}"##
+            ))
+        }
+    } else {
+        Event::message(format!(
+            r##"{{"user_id": {user_id}, "error": "No session for current user!"}}"##
+        ))
+    };
+
+    SSE::new(stream::once(async move { event }))
+}
 
 impl WebApp {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    fn set_current_user(&mut self, user: Option<UserId>) {
-        self.current_user = user;
     }
 
     fn hash_password(pass: &str) -> String {
@@ -377,5 +552,6 @@ impl WebApp {
             .at("/message-signed", get(view_message_signed))
             .at("/key/generate", get(view_generate_key))
             .at("/key/discard", get(view_discard_key))
+            .at("/favicon.ico", get(favicon))
     }
 }
