@@ -117,6 +117,7 @@ async fn view_sign_message(
             if db.lock().await.get_user_key(*user_id).is_ok() {
                 let user_id = *user_id;
                 state.pending_messages.insert(user_id, params.message);
+                let username = db.lock().await.get_user_name(user_id).unwrap_or_default();
 
                 Html(format!(
                     "{}{}{}{}{}",
@@ -125,7 +126,9 @@ async fn view_sign_message(
                         HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
                         &format!(
                             "{}{}",
-                            HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_DISCARD_KEY
+                            HTML_NAVBAR_MENU_ITEM_LOGOUT
+                                .replace(HTML_USERNAME_PLACEHOLDER, &username),
+                            HTML_NAVBAR_MENU_ITEM_DISCARD_KEY
                         )
                     ),
                     HTML_BODY_CONTENT.replace(
@@ -133,33 +136,6 @@ async fn view_sign_message(
                         HTML_BODY_CONTENT_SIGN_ONGOING
                     ),
                     HTML_SCRIPT_SSE.replace(HTML_USERID_PLACEHOLDER, &user_id.to_string()),
-                //     format!(
-                //         r##" <script>
-                //     var eventSource = new EventSource('event/{user_id}');
-                //     eventSource.onmessage = function(event) {{
-                //         console.log("Received event");
-                //         eventSource.close();
-                //         console.log(event.data);
-                //         const obj = JSON.parse(event.data);
-                //         console.log(obj);
-
-                //         const elem = document.getElementById("sign_progress");
-                //         elem.value = 100;
-
-                //         if (obj.error === "none") {{
-                //             console.log("redirecting");
-                //             sign_done();
-                //         }} else {{
-                //             console.log(obj.error); // todo
-                //         }}
-                //     }}
-                //     async function sign_done() {{
-                //         await new Promise(resolve => setTimeout(resolve, 500));
-                //         window.location.href = "/message-signed"
-                //     }}
-                //     </script>
-                // "##
-                //     ),
                     HTML_BODY_FOOTER
                 ))
                 .into_response()
@@ -187,6 +163,7 @@ async fn view_sign_message(
 async fn view_message_signed(
     session: &Session,
     state: Data<&Arc<Mutex<WebApp>>>,
+    db: Data<&Arc<Mutex<MemDb>>>,
 ) -> impl IntoResponse {
     let mut state = state.lock().await;
 
@@ -194,6 +171,8 @@ async fn view_message_signed(
         if let Some(user_id) = state.current_users.get(&user_session) {
             let user_id = *user_id;
             if let Some(msg) = state.signed_messages.remove(&user_id) {
+                let username = db.lock().await.get_user_name(user_id).unwrap_or_default();
+
                 Html(format!(
                     "{}{}{}{}",
                     HTML_HEAD,
@@ -201,7 +180,8 @@ async fn view_message_signed(
                         HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
                         &format!(
                             "{}{}{}",
-                            HTML_NAVBAR_MENU_ITEM_LOGOUT,
+                            HTML_NAVBAR_MENU_ITEM_LOGOUT
+                                .replace(HTML_USERNAME_PLACEHOLDER, &username),
                             HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE,
                             HTML_NAVBAR_MENU_ITEM_DISCARD_KEY,
                         )
@@ -268,13 +248,18 @@ async fn view_index(
                     HTML_BODY_CONTENT_SIGN_MESSAGE.to_string(),
                 )
             };
+            let username = db.lock().await.get_user_name(*user_id).unwrap_or_default();
 
             Html(format!(
                 "{}{}{}{}",
                 HTML_HEAD,
                 HTML_BODY_NAVBAR.replace(
                     HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
-                    &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, menu_item)
+                    &format!(
+                        "{}{}",
+                        HTML_NAVBAR_MENU_ITEM_LOGOUT.replace(HTML_USERNAME_PLACEHOLDER, &username),
+                        menu_item
+                    )
                 ),
                 HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &body_content),
                 HTML_BODY_FOOTER
@@ -322,6 +307,7 @@ async fn view_generate_key(
             } else {
                 let key = sign_service.lock().await.generate_key();
                 db.lock().await.add_user_key(*user_id, &key).ok();
+                let username = db.lock().await.get_user_name(*user_id).unwrap_or_default();
                 Html(format!(
                     "{}{}{}{}",
                     HTML_HEAD,
@@ -329,7 +315,8 @@ async fn view_generate_key(
                         HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
                         &format!(
                             "{}{}{}",
-                            HTML_NAVBAR_MENU_ITEM_LOGOUT,
+                            HTML_NAVBAR_MENU_ITEM_LOGOUT
+                                .replace(HTML_USERNAME_PLACEHOLDER, &username),
                             HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE,
                             HTML_NAVBAR_MENU_ITEM_DISCARD_KEY
                         )
@@ -374,6 +361,7 @@ async fn view_discard_key(
                 .into_response()
             } else {
                 db.lock().await.discard_user_key(*user_id).ok();
+                let username = db.lock().await.get_user_name(*user_id).unwrap_or_default();
                 Html(format!(
                     "{}{}{}{}",
                     HTML_HEAD,
@@ -381,7 +369,9 @@ async fn view_discard_key(
                         HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
                         &format!(
                             "{}{}",
-                            HTML_NAVBAR_MENU_ITEM_LOGOUT, HTML_NAVBAR_MENU_ITEM_GENERATE_KEY
+                            HTML_NAVBAR_MENU_ITEM_LOGOUT
+                                .replace(HTML_USERNAME_PLACEHOLDER, &username),
+                            HTML_NAVBAR_MENU_ITEM_GENERATE_KEY
                         )
                     ),
                     HTML_BODY_CONTENT.replace(

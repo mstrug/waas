@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
   </div>"##;
 pub const HTML_NAVBAR_MENU_ITEM_PLACEHOLDER: &str = "{menu-items}";
 pub const HTML_NAVBAR_MENU_ITEM_LOGIN: &str = r##"<a class="navbar-item" href="/login"> Login </a>"##;
-pub const HTML_NAVBAR_MENU_ITEM_LOGOUT: &str = r##"<a class="navbar-item" href="/logout"> Logout </a>"##;
+pub const HTML_NAVBAR_MENU_ITEM_LOGOUT: &str = r##"<a class="navbar-item" href="/logout"> Logout {user} </a>"##;
 pub const HTML_NAVBAR_MENU_ITEM_GENERATE_KEY: &str = r##"<a class="navbar-item" href="/key/generate"> Generate Key </a>"##;
 pub const HTML_NAVBAR_MENU_ITEM_DISCARD_KEY: &str = r##"<a class="navbar-item" href="/key/discard"> Discard Key </a>"##;
 pub const HTML_NAVBAR_MENU_ITEM_SIGN_MESSAGE: &str = r##"<a class="navbar-item" href="/"> Sign Message </a>"##;
@@ -163,7 +163,7 @@ pub const HTML_BODY_FOOTER: &str = r##"
   <div class="hero-foot">
     <div class="content has-text-centered m-2">
     <p>
-      <strong>Rust Fullstack demo</strong> by <a href="https://www.linkedin.com/in/michal-strug/">Michał Strug</a> using <a href="https://github.com/poem-web/poem">Poem</a> and <a href="https://bulma.io/">Bulma CSS</a>. v0.1.1
+      <strong>Rust Fullstack demo</strong> by <a href="https://www.linkedin.com/in/michal-strug/">Michał Strug</a> using <a href="https://github.com/poem-web/poem">Poem</a> and <a href="https://bulma.io/">Bulma CSS</a>. v0.1.2
     </p>
   </div>
   </div>

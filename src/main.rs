@@ -1,18 +1,21 @@
-use db::MemDb;
 use poem::{
-    listener::TcpListener, middleware::{Tracing, CatchPanic}, EndpointExt, Server,
-    session::{CookieConfig, CookieSession}, web::cookie::CookieKey,
+    listener::TcpListener,
+    middleware::{CatchPanic, Tracing},
+    session::{CookieConfig, CookieSession},
+    web::cookie::CookieKey,
+    EndpointExt, Server,
 };
 use service::SignService;
-use tokio::sync::Mutex;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
+use db::MemDb;
 use web_app::WebApp;
 
-mod web_app;
 mod db;
 mod service;
 mod template;
+mod web_app;
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
@@ -29,7 +32,9 @@ async fn main() -> Result<(), std::io::Error> {
         .data(Arc::new(Mutex::new(app)))
         .data(Arc::new(Mutex::new(db)))
         .data(Arc::new(Mutex::new(sign_service)))
-        .with(CookieSession::new(CookieConfig::private( CookieKey::generate() ).secure(false)))
+        .with(CookieSession::new(
+            CookieConfig::private(CookieKey::generate()).secure(false),
+        ))
         .with(Tracing)
         .with(CatchPanic::new())
         .catch_all_error(web_app::custom_error);
