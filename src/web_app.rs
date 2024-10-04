@@ -105,8 +105,7 @@ async fn view_sign_message(
 
     if let Some(user_session) = session.get::<String>("user_session") {
         if let Some(user_id) = state.current_users.get(&user_session) {
-            let user_id = user_id.clone();
-            if state.pending_messages.get(&user_id).is_some() {
+            if state.pending_messages.contains_key(user_id) {
                 return custom_error(Error::from_string(
                     "User already waits for message sign",
                     StatusCode::NOT_FOUND,
@@ -115,7 +114,8 @@ async fn view_sign_message(
                 .into_response();
             }
 
-            if db.lock().await.get_user_key(user_id).is_ok() {
+            if db.lock().await.get_user_key(*user_id).is_ok() {
+                let user_id = *user_id;
                 state.pending_messages.insert(user_id, params.message);
 
                 Html(format!(
@@ -132,33 +132,34 @@ async fn view_sign_message(
                         HTML_BODY_CONTENT_PLACEHOLDER,
                         HTML_BODY_CONTENT_SIGN_ONGOING
                     ),
-                    format!(
-                        r##" <script>
-                    var eventSource = new EventSource('event/{user_id}');
-                    eventSource.onmessage = function(event) {{
-                        console.log("Received event");
-                        eventSource.close();
-                        console.log(event.data);
-                        const obj = JSON.parse(event.data);
-                        console.log(obj);
+                    HTML_SCRIPT_SSE.replace(HTML_USERID_PLACEHOLDER, &user_id.to_string()),
+                //     format!(
+                //         r##" <script>
+                //     var eventSource = new EventSource('event/{user_id}');
+                //     eventSource.onmessage = function(event) {{
+                //         console.log("Received event");
+                //         eventSource.close();
+                //         console.log(event.data);
+                //         const obj = JSON.parse(event.data);
+                //         console.log(obj);
 
-                        const elem = document.getElementById("sign_progress");
-                        elem.value = 100;
+                //         const elem = document.getElementById("sign_progress");
+                //         elem.value = 100;
 
-                        if (obj.error === "none") {{
-                            console.log("redirecting");
-                            sign_done();
-                        }} else {{
-                            console.log(obj.error); // todo
-                        }}
-                    }}
-                    async function sign_done() {{
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                        window.location.href = "/message-signed"
-                    }}
-                    </script>
-                "##
-                    ),
+                //         if (obj.error === "none") {{
+                //             console.log("redirecting");
+                //             sign_done();
+                //         }} else {{
+                //             console.log(obj.error); // todo
+                //         }}
+                //     }}
+                //     async function sign_done() {{
+                //         await new Promise(resolve => setTimeout(resolve, 500));
+                //         window.location.href = "/message-signed"
+                //     }}
+                //     </script>
+                // "##
+                //     ),
                     HTML_BODY_FOOTER
                 ))
                 .into_response()
@@ -191,7 +192,7 @@ async fn view_message_signed(
 
     if let Some(user_session) = session.get::<String>("user_session") {
         if let Some(user_id) = state.current_users.get(&user_session) {
-            let user_id = user_id.clone();
+            let user_id = *user_id;
             if let Some(msg) = state.signed_messages.remove(&user_id) {
                 Html(format!(
                     "{}{}{}{}",
@@ -364,7 +365,7 @@ async fn view_discard_key(
 ) -> impl IntoResponse {
     if let Some(user_session) = session.get::<String>("user_session") {
         if let Some(user_id) = state.lock().await.current_users.get(&user_session) {
-            if !db.lock().await.get_user_key(*user_id).is_ok() {
+            if db.lock().await.get_user_key(*user_id).is_err() {
                 custom_error(Error::from_string(
                     "User doesn't have a key",
                     StatusCode::NOT_FOUND,

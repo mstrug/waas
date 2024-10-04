@@ -105,6 +105,7 @@ pub const HTML_BODY_CONTENT_LOGIN: &str = r##"<form action="/login" method="post
                 </div>
             </form>"##;
 pub const HTML_USERNAME_PLACEHOLDER: &str = "{user}";
+pub const HTML_USERID_PLACEHOLDER: &str = "{user-id}";
 pub const HTML_ERROR_PLACEHOLDER: &str = "{error}";
 pub const HTML_BODY_CONTENT_INTERNAL_PLACEHOLDER: &str = "{body-content-internal}";
 pub const HTML_BODY_CONTENT_NO_KEY: &str = r##"
@@ -170,3 +171,30 @@ pub const HTML_BODY_FOOTER: &str = r##"
 
     </body>
     </html>"##;
+
+pub const HTML_SCRIPT_SSE: &str = r##" <script>
+                    var eventSource = new EventSource('event/{user-id}');
+                    eventSource.onmessage = function(event) {{
+                        console.log("Received event");
+                        eventSource.close();
+                        console.log(event.data);
+                        const obj = JSON.parse(event.data);
+                        console.log(obj);
+
+                        const elem = document.getElementById("sign_progress");
+                        elem.value = 100;
+
+                        if (obj.error === "none") {{
+                            console.log("redirecting");
+                            sign_done();
+                        }} else {{
+                            console.log(obj.error); // todo
+                        }}
+                    }}
+                    async function sign_done() {{
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        window.location.href = "/message-signed"
+                    }}
+                    </script>
+                "##;
+
