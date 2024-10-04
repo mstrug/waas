@@ -7,13 +7,18 @@ use poem::{
     listener::TcpListener,
     middleware::AddData,
     session::{CookieConfig, CookieSession, Session},
-    web::{Data, Form, Html},
+    web::{Data, Form, Html, Path},
+    web::sse::{Event, SSE},
     EndpointExt, IntoResponse, Response, Result, Route, Server,
 };
 use pwhash::bcrypt::*;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use futures_util::stream;
+use std::time::Instant;
+use tokio::time::Duration;
+use futures_util::{stream::BoxStream, Stream, StreamExt};
 
 mod template;
 use template::*;
@@ -97,7 +102,7 @@ async fn view_sign_message(
         if let Ok(key) = db.lock().await.get_user_key(user_id).await {
             let signed_message = sign_service.lock().await.sign_message(&params.message, &key).await;
             Html(format!(
-                "{}{}{}{}",
+                "{}{}{}{}{}",
                 HTML_HEAD,
                 HTML_BODY_NAVBAR.replace(
                     HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
@@ -110,6 +115,19 @@ async fn view_sign_message(
                     HTML_BODY_CONTENT_PLACEHOLDER,
                     &format!("{}<br>{:?}", HTML_BODY_CONTENT_SIGN_ONGOING, signed_message)
                 ),
+                r##" <script>
+                    var eventSource = new EventSource('event/123');
+                    eventSource.onmessage = function(event) {
+                        console.log("Received event");
+                        eventSource.close();
+                        const obj = JSON.parse(event.data);
+                        console.log(obj);
+
+                        const elem = document.getElementById("sign_progress");
+                        elem.value = obj.id;
+                    }
+                    </script>
+                "##,
                 HTML_BODY_FOOTER
             ))
             .into_response()
@@ -190,6 +208,25 @@ pub async fn custom_error(err: Error) -> impl IntoResponse {
     .into_response()
 }
 
+async fn sss(user_id: UserId) -> Event {
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    println!("got event for user: {}", user_id);
+    Event::message(r##"{"id": 58, "msg": "text"}"##.to_string())
+}
+
+#[handler]
+async fn event(Path(user_id): Path<UserId>, sign_service: Data<&Arc<Mutex<SignService>>>) -> SSE {
+
+    println!("called event endpoint: {}", user_id);
+
+    let aa = stream::once(sss(user_id));
+
+    SSE::new(
+        aa
+    )
+}
+
+
 impl WebApp {
     pub fn new() -> Self {
         Self { current_user: None }
@@ -215,5 +252,6 @@ impl WebApp {
             .at("/login", get(view_login).post(view_login_validate))
             .at("/logout", get(view_logout))
             .at("/sign", post(view_sign_message))
+            .at("/event/:user_id", get(event))
     }
 }

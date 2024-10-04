@@ -94,7 +94,7 @@ pub const HTML_BODY_CONTENT_SIGN_ONGOING: &str = r##"
     <div class="has-text-centered">
         <div class="block"><p class="subtitle is-3">Signing your message...</p></div>
         <div class="block">
-            <progress class="progress is-small is-primary" max="100">15%</progress>
+            <progress id="sign_progress" class="progress is-small is-primary" max="100">15%</progress>
         </div>
     </div>"##;
 pub const HTML_BODY_CONTENT_ANY_ERROR: &str = r##"
