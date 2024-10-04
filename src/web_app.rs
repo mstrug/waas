@@ -1,29 +1,20 @@
 use futures_util::stream;
-use futures_util::{stream::BoxStream, Stream, StreamExt};
-use poem::middleware::AddDataEndpoint;
-use poem::post;
-use poem::Error;
 use poem::{
     get, handler,
     http::{header, StatusCode},
-    listener::TcpListener,
-    middleware::AddData,
-    session::{CookieConfig, CookieSession, Session},
+    post,
+    session::Session,
     web::sse::{Event, SSE},
     web::{Data, Form, Html, Path},
-    EndpointExt, IntoResponse, Response, Result, Route, Server,
+    Error, IntoResponse, Response, Route,
 };
 use pwhash::bcrypt::*;
 use rand::Rng;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
-use tokio::time::Duration;
 
-use super::db::UserId;
-use super::db::{DbInterface, MemDb};
+use super::db::{MemDb, UserId};
 use super::service::SignService;
 use super::template::*;
 
@@ -66,40 +57,41 @@ async fn view_login_validate(
 ) -> impl IntoResponse {
     let pass_hash = WebApp::hash_password(&params.password);
 
-    if let Ok(user_id) = db
-        .lock()
-        .await
-        .validate_user_password(&params.username, &pass_hash)
-        .await
-    {
-        let user_session: String = (0..16)
-            .map(|_| char::from(rand::thread_rng().gen_range(32..127)))
-            .collect();
-        session.set("user_session", &user_session);
-
-        state
+    if let Some(pass_hash) = pass_hash {
+        if let Ok(user_id) = db
             .lock()
             .await
-            .current_users
-            .insert(user_session, user_id);
+            .validate_user_password(&params.username, &pass_hash)
+        {
+            let user_session: String = (0..16)
+                .map(|_| char::from(rand::thread_rng().gen_range(32..127)))
+                .collect();
+            session.set("user_session", &user_session);
 
-        Response::builder()
-            .status(StatusCode::FOUND)
-            .header(header::LOCATION, "/")
-            .finish()
-    } else {
-        Html(format!(
-            "{}{}{}{}",
-            HTML_HEAD,
-            HTML_BODY_NAVBAR.replace(
-                HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
-                HTML_NAVBAR_MENU_ITEM_LOGIN
-            ),
-            HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_WRONG_PASS),
-            HTML_BODY_FOOTER
-        ))
-        .into_response()
+            state
+                .lock()
+                .await
+                .current_users
+                .insert(user_session, user_id);
+
+            return Response::builder()
+                .status(StatusCode::FOUND)
+                .header(header::LOCATION, "/")
+                .finish();
+        }
     }
+
+    Html(format!(
+        "{}{}{}{}",
+        HTML_HEAD,
+        HTML_BODY_NAVBAR.replace(
+            HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
+            HTML_NAVBAR_MENU_ITEM_LOGIN
+        ),
+        HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, HTML_BODY_WRONG_PASS),
+        HTML_BODY_FOOTER
+    ))
+    .into_response()
 }
 
 #[handler]
@@ -108,7 +100,6 @@ async fn view_sign_message(
     session: &Session,
     state: Data<&Arc<Mutex<WebApp>>>,
     db: Data<&Arc<Mutex<MemDb>>>,
-    sign_service: Data<&Arc<Mutex<SignService>>>,
 ) -> impl IntoResponse {
     let mut state = state.lock().await;
 
@@ -124,9 +115,7 @@ async fn view_sign_message(
                 .into_response();
             }
 
-            if let Ok(key) = db.lock().await.get_user_key(user_id).await {
-                //let signed_message = sign_service.lock().await.sign_message(&params.message, &key).await;
-
+            if db.lock().await.get_user_key(user_id).is_ok() {
                 state.pending_messages.insert(user_id, params.message);
 
                 Html(format!(
@@ -197,8 +186,6 @@ async fn view_sign_message(
 async fn view_message_signed(
     session: &Session,
     state: Data<&Arc<Mutex<WebApp>>>,
-    db: Data<&Arc<Mutex<MemDb>>>,
-    sign_service: Data<&Arc<Mutex<SignService>>>,
 ) -> impl IntoResponse {
     let mut state = state.lock().await;
 
@@ -262,12 +249,17 @@ async fn view_index(
 
     if let Some(user_session) = session.get::<String>("user_session") {
         if let Some(user_id) = state.lock().await.current_users.get(&user_session) {
-            let key_available = db.lock().await.get_user_key(*user_id).await.is_ok();
+            let key_available = db.lock().await.get_user_key(*user_id).is_ok();
 
             let (menu_item, body_content) = if !key_available {
+                let user_name = db
+                    .lock()
+                    .await
+                    .get_user_name(*user_id)
+                    .unwrap_or("Unknown user".to_string());
                 (
                     HTML_NAVBAR_MENU_ITEM_GENERATE_KEY,
-                    HTML_BODY_CONTENT_NO_KEY.replace(HTML_USERNAME_PLACEHOLDER, "todo!"),
+                    HTML_BODY_CONTENT_NO_KEY.replace(HTML_USERNAME_PLACEHOLDER, &user_name),
                 )
             } else {
                 (
@@ -295,40 +287,6 @@ async fn view_index(
     } else {
         go_to_login_view
     }
-
-    // if let Some(user_id) = state.lock().await.current_users {
-    //     let key_available = db.lock().await.get_user_key(user_id).await.is_ok();
-    //     let username = session.get::<String>("username").unwrap();
-
-    //     let (menu_item, body_content) = if !key_available {
-    //         (
-    //             HTML_NAVBAR_MENU_ITEM_GENERATE_KEY,
-    //             HTML_BODY_CONTENT_NO_KEY.replace(HTML_USERNAME_PLACEHOLDER, &username),
-    //         )
-    //     } else {
-    //         (
-    //             HTML_NAVBAR_MENU_ITEM_DISCARD_KEY,
-    //             HTML_BODY_CONTENT_SIGN_MESSAGE.to_string(),
-    //         )
-    //     };
-
-    //     Html(format!(
-    //         "{}{}{}{}",
-    //         HTML_HEAD,
-    //         HTML_BODY_NAVBAR.replace(
-    //             HTML_NAVBAR_MENU_ITEM_PLACEHOLDER,
-    //             &format!("{}{}", HTML_NAVBAR_MENU_ITEM_LOGOUT, menu_item)
-    //         ),
-    //         HTML_BODY_CONTENT.replace(HTML_BODY_CONTENT_PLACEHOLDER, &body_content),
-    //         HTML_BODY_FOOTER
-    //     ))
-    //     .into_response()
-    // } else {
-    //     Response::builder()
-    //         .status(StatusCode::FOUND)
-    //         .header(header::LOCATION, "/login")
-    //         .finish()
-    // }
 }
 
 #[handler]
@@ -353,7 +311,7 @@ async fn view_generate_key(
 ) -> impl IntoResponse {
     if let Some(user_session) = session.get::<String>("user_session") {
         if let Some(user_id) = state.lock().await.current_users.get(&user_session) {
-            if db.lock().await.get_user_key(*user_id).await.is_ok() {
+            if db.lock().await.get_user_key(*user_id).is_ok() {
                 custom_error(Error::from_string(
                     "User already has a key",
                     StatusCode::NOT_FOUND,
@@ -362,7 +320,7 @@ async fn view_generate_key(
                 .into_response()
             } else {
                 let key = sign_service.lock().await.generate_key();
-                db.lock().await.add_user_key(*user_id, &key).await.ok();
+                db.lock().await.add_user_key(*user_id, &key).ok();
                 Html(format!(
                     "{}{}{}{}",
                     HTML_HEAD,
@@ -403,11 +361,10 @@ async fn view_discard_key(
     session: &Session,
     state: Data<&Arc<Mutex<WebApp>>>,
     db: Data<&Arc<Mutex<MemDb>>>,
-    sign_service: Data<&Arc<Mutex<SignService>>>,
 ) -> impl IntoResponse {
     if let Some(user_session) = session.get::<String>("user_session") {
         if let Some(user_id) = state.lock().await.current_users.get(&user_session) {
-            if !db.lock().await.get_user_key(*user_id).await.is_ok() {
+            if !db.lock().await.get_user_key(*user_id).is_ok() {
                 custom_error(Error::from_string(
                     "User doesn't have a key",
                     StatusCode::NOT_FOUND,
@@ -415,7 +372,7 @@ async fn view_discard_key(
                 .await
                 .into_response()
             } else {
-                db.lock().await.discard_user_key(*user_id).await.ok();
+                db.lock().await.discard_user_key(*user_id).ok();
                 Html(format!(
                     "{}{}{}{}",
                     HTML_HEAD,
@@ -468,11 +425,11 @@ async fn favicon() -> impl IntoResponse {
     Response::builder()
         .status(StatusCode::OK)
         .content_type("image/vnd.microsoft.icon")
-        .body(vec![ 0,0,1,0,1,0,1,1, 0,0,1,0,0x20,0,0x30,0, 
-                    0,0,0x16,0,0,0,0x28,0, 0,0,1,0,0,0,2,0,
-                    0,0,1,0,0x20,0,0,0, 0,0,4,0,0,0,0xC2,0x1E,
-                    0,0,0x2C,0x1E,0,0,0,0, 0,0,0,0,0,0,0xFC,0xFE,
-                    0xFC,0xFF,0,0,0,0])
+        .body(vec![
+            0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0x20, 0, 0x30, 0, 0, 0, 0x16, 0, 0, 0, 0x28, 0, 0,
+            0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0x20, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0xC2, 0x1E, 0, 0,
+            0x2C, 0x1E, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFC, 0xFE, 0xFC, 0xFF, 0, 0, 0, 0,
+        ])
         .into_response()
 }
 
@@ -494,13 +451,21 @@ async fn event(
                 println!("1");
 
                 if let Some(msg) = state.pending_messages.remove(&user_id) {
-                    let key = db.lock().await.get_user_key(user_id).await.unwrap();
-                    if let Ok(output) = sign_service.lock().await.sign_message(&msg, &key).await {
-                        state.signed_messages.insert(user_id, output);
-                        Event::message(format!(r##"{{"user_id": {user_id}, "error": "none"}}"##))
+                    if let Ok(key) = db.lock().await.get_user_key(user_id) {
+                        if let Ok(output) = sign_service.lock().await.sign_message(&msg, &key).await
+                        {
+                            state.signed_messages.insert(user_id, output);
+                            Event::message(format!(
+                                r##"{{"user_id": {user_id}, "error": "none"}}"##
+                            ))
+                        } else {
+                            Event::message(format!(
+                                r##"{{"user_id": {user_id}, "error": "Signing of message failed!"}}"##
+                            ))
+                        }
                     } else {
                         Event::message(format!(
-                            r##"{{"user_id": {user_id}, "error": "Signing of message failed!"}}"##
+                            r##"{{"user_id": {user_id}, "error": "Key not found!"}}"##
                         ))
                     }
                 } else {
@@ -532,14 +497,14 @@ impl WebApp {
         Self::default()
     }
 
-    fn hash_password(pass: &str) -> String {
+    fn hash_password(pass: &str) -> Option<String> {
         let setup = BcryptSetup {
             salt: Some("gifLHpZdNAixJzy36HyOcK"),
             cost: Some(5),
             variant: Some(BcryptVariant::V2y),
         };
 
-        hash_with(setup, pass).unwrap()
+        hash_with(setup, pass).ok()
     }
 
     pub fn setup_route() -> Route {

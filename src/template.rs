@@ -162,7 +162,7 @@ pub const HTML_BODY_FOOTER: &str = r##"
   <div class="hero-foot">
     <div class="content has-text-centered m-2">
     <p>
-      <strong>Rust Fullstack demo</strong> by <a href="https://www.linkedin.com/in/michal-strug/">Michał Strug</a> using <a href="https://github.com/poem-web/poem">Poem</a> and <a href="https://bulma.io/">Bulma CSS</a>. v0.1.0
+      <strong>Rust Fullstack demo</strong> by <a href="https://www.linkedin.com/in/michal-strug/">Michał Strug</a> using <a href="https://github.com/poem-web/poem">Poem</a> and <a href="https://bulma.io/">Bulma CSS</a>. v0.1.1
     </p>
   </div>
   </div>

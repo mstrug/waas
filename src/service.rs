@@ -1,5 +1,5 @@
 use tokio::time::Duration;
-use k256::{ecdsa::{SigningKey, Signature, signature::Signer, VerifyingKey, signature::Verifier}};
+use k256::ecdsa::{SigningKey, Signature, signature::Signer};
 use rand_core::OsRng; 
 use base64::prelude::*;
 

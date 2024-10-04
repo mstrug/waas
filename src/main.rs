@@ -1,15 +1,12 @@
 use db::MemDb;
 use poem::{
-    get, handler, listener::TcpListener, middleware::{Tracing, CatchPanic}, web::Path, EndpointExt, Route, Server,
-    session::{CookieConfig, CookieSession, Session},
+    listener::TcpListener, middleware::{Tracing, CatchPanic}, EndpointExt, Server,
+    session::{CookieConfig, CookieSession}, web::cookie::CookieKey,
 };
-use poem::web::cookie::CookieKey;
 use service::SignService;
-use std::sync::RwLock;
-use std::sync::{Arc};
-use std::cell::RefCell;
-use futures_util::{SinkExt, StreamExt};
 use tokio::sync::Mutex;
+use std::sync::Arc;
+
 use web_app::WebApp;
 
 mod web_app;
